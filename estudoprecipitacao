@@ -1,0 +1,257 @@
+// Código para usar no GEE
+// Elaborado por Christhian Santana Cunha ( https://www.youtube.com/watch?v=EUiDMgtU2bY ) 
+
+// Definição do intervalo de tempo para análise 
+
+Map.setOptions('SATELLITE') //padronizar a imagem de satelite no fundo ao invés do mapa 
+var startyear = 1989;
+var endyear = 2019; 
+
+// Criar lista de meses para utilizar nas funções 
+var months = ee.List.sequence(1,12);
+
+// Definir ínicio e fim 
+var startDate = ee.Date.fromYMD(startyear, 1, 1);
+var endDate = startDate.advance(endyear, 12,31);
+
+// Lista para a variável 'years' 
+var years = ee.List.sequence(startyear,endyear); 
+
+// Definição da área de estudo 
+var area_estudo = ee.FeatureCollection('users/sofiabheatrice/subbacias_ME_itaipu_SIRGAS2000_UTM21S'); //importação de shapefile, olhar os features da coleção
+print(area_estudo);
+Map.addLayer(area_estudo.draw({color: '2D6DED', strokeWidth: 1}), {}, 'areas de contribuição');
+
+.filtter(ee.Filter.eq('descricao', 'Rio Ocoí')); //definir o filtro e selecionar a feição que eu desejo analisar 
+var empty = ee.Image().byte(); 
+var outline = empty.paint ({
+featureCollection: area_estudo,
+color: 1,
+width: 2
+}); 
+
+Map.addLayer(outline, {palette: '#000000'}, 'Sub-bacias do Reservatório', 1); 
+
+// Coleção de imagem para precipitação - CHIRPS 
+var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+.select('preciptation')
+.filtterDate(startdade,enddate)
+//.sort('system:time_start', false)
+.filterBounds(area_estudo); //somente as imagens interceptadas pela area de estudo serão consideradas
+
+//Preciptação anual 
+var prep_anual = ee.ImageCollection.fromImage(
+years.map(function (year) {   //o map funciona para atribuir o calculo da preciptação a cada imagem da Image Collection
+var annual = prep_anual.filter(ee.FiltercalendarRange(year,year, 'year'))
+.sum()
+.clip(area_estudo)
+return annual
+.set('year', year)
+.set('system:time_start', ee.Date.fromYMD(year, 1, 1)); 
+})); 
+
+//Gráfico precipitação anual
+var chartP_aanual = ui.Chart.image.series.ByRegion({
+imageCollection: prep_anual,
+regions: area_estudo,
+reducer: ee.Reducer.mean(),
+band: 'preciptation',
+scale: 2500,
+xProperty: 'system:time_start',
+seriesProperty: 'Nome'})
+.setOptions({
+title: 'Precipitação anual do Rio Ocoí',
+hAxis: {title: 'Intervalo de tempo'},
+vAxis: {title: 'P (mm)'}}
+)
+.setChartType('ColumnChart');
+print(chartP_anual)
+
+// Adicionando layers
+var VisAnual = {opacity:1,
+            bands:["precipitation"],
+            min:954.00,
+            max:2038.00,
+            palette:['cyan','darkblue','orange','Magenta','DarkMagenta','DeepPink']};
+
+Map.addLayer(prep_anual, VisAnual, 'Precipitação Anual CHIRPS',1);
+
+//Calculo da preciptação mensal 
+var precipitacao_mensal_acum =  ee.ImageCollection.fromImages(  //RETORNA A IMAGEM PARA COLEÇÃO 
+  years.map(function (ano) { // APLICAR A FUNÇÃO MAP (LOOP) PARA  A VARIÁVEL YEARS
+  
+  return months.map(function(mes){ //  returnar a variável months com a seguinte função P:  
+  
+  var pre_month = P.filter(ee.Filter.calendarRange(ano, ano, 'year'))  //filtro por ano,
+           .filter(ee.Filter.calendarRange(mes, mes, 'month')) //  filtro por mês
+           .sum() // SUM - SOMAR TODOS OS VALORES DA COLEÇÃO NO MÊS 
+           .clip(area_estudo);
+  
+  return pre_month.set('year', ano) // INTERVALO ANO = Y
+           .set('month', mes) // INTERVALO MONTH = m 
+           .set('date', ee.Date.fromYMD(ano,mes,1)) // DATE É A DATA QUE VEM DE Y ANO, M MÊS E 1 DIA 1.
+           .set('system:time_start',ee.Date.fromYMD(ano,mes,1)); // INTERVALO SYSTEM TIME_START DAS COLEÇÕES
+            }); 
+          }).flatten()
+          ); /// EMPILHAR COLEÇÕES 
+
+////////////////// FUNÇÃO PARA INSERIR GRÁFICO DE SÉRIES POR REGIÃO /////////////////////  
+
+var chartP = ui.Chart.image.seriesByRegion({
+    imageCollection: chirps,
+    regions: area_estudo, 
+    reducer: ee.Reducer.mean(), 
+    band: 'precipitation', 
+    scale: 2500, 
+    xProperty: 'system:time_start', 
+    seriesProperty: 'Nome'})
+    .setOptions({
+      title: 'Precipitação mensal Rio Ocoí',
+      hAxis: {title: 'Intervalo de tempo'},
+      vAxis: {title: 'P (mm)'}}
+      )
+    .setChartType('ColumnChart');  
+
+print(chartP)
+
+/**************************************ADICIONANDO LAYERS*******************************/
+var Vis = {opacity:1,
+            bands:["precipitation"],
+            min:60.00,
+            max:165.00,
+            palette:['red','orange','yellow','green','cyan','blue','darkblue']};
+
+Map.addLayer(precipitacao_mensal_acum, Vis, 'Precipitação Mensal CHIRPS',1);
+
+/**************************************CRIANDO LEGENDA***********************************/
+//visualização de cores do painel
+// create vizualization parameters
+var VisP = {
+  min:960.00, 
+  max:2055.00,
+  palette:['cyan','darkblue','orange','Magenta','DarkMagenta','DeepPink']};
+
+
+// definir a posição do painel
+var legend = ui.Panel({
+style: {
+position: 'bottom-right', //posição
+padding: '8px 15px' //Preenchimento 
+}
+});
+ 
+// Criando o título da legenda
+var legendTitle = ui.Label({
+value: 'Precipitação (mm/ano)',
+style: {
+fontWeight: 'bold', //espessura da fonte
+fontSize: '12px', //tamanho da fonte
+margin: '0 0 4px 0', //margem
+padding: '0' //preenchimento
+}
+});
+ 
+// Adicione o título ao painel
+legend.add(legendTitle);
+ 
+// crie a imagem da legenda
+var lon = ee.Image.pixelLonLat().select('latitude');
+var gradient = lon.multiply((VisP.max-VisP.min)/100.0).add(VisP.min);
+var legendImage = gradient.visualize(VisP);
+ 
+// criar texto no topo da legenda
+var panel = ui.Panel({
+widgets: [
+ui.Label(VisP['max'])
+],
+});
+
+legend.add(panel);
+ 
+//criar miniatura da imagem
+var thumbnail = ui.Thumbnail({
+image: legendImage,
+params: {bbox:'0,0,10,100', dimensions:'10x200'},
+style: {padding: '1px', position: 'bottom-center'}
+});
+ 
+// adicione a miniatura à legenda
+legend.add(thumbnail);
+ 
+//criar texto no topo da legenda
+var panel = ui.Panel({
+widgets: [
+ui.Label(VisP['min'])
+],
+});
+ 
+legend.add(panel);
+ 
+Map.add(legend)
+
+
+/**********************************Legenda Mensal **************************************/
+//visualização de cores do painel
+// create vizualization parameters
+var VisP = {
+  min:60, 
+  max:165,
+  palette:['red','orange','yellow','green','cyan','blue','darkblue']};
+
+
+// definir a posição do painel
+var legend = ui.Panel({
+style: {
+position: 'bottom-left', //posição
+padding: '8px 15px' //Preenchimento 
+}
+});
+ 
+// Criando o título da legenda
+var legendTitle = ui.Label({
+value: 'Precipitação (mm/mês)',
+style: {
+fontWeight: 'bold', //espessura da fonte
+fontSize: '12px', //tamanho da fonte
+margin: '0 0 4px 0', //margem
+padding: '0' //preenchimento
+}
+});
+ 
+// Adicione o título ao painel
+legend.add(legendTitle);
+ 
+// crie a imagem da legenda
+var lon = ee.Image.pixelLonLat().select('latitude');
+var gradient = lon.multiply((VisP.max-VisP.min)/100.0).add(VisP.min);
+var legendImage = gradient.visualize(VisP);
+ 
+// criar texto no topo da legenda
+var panel = ui.Panel({
+widgets: [
+ui.Label(VisP['max'])
+],
+});
+
+legend.add(panel);
+ 
+//criar miniatura da imagem
+var thumbnail = ui.Thumbnail({
+image: legendImage,
+params: {bbox:'0,0,10,100', dimensions:'10x200'},
+style: {padding: '1px', position: 'bottom-center'}
+});
+ 
+// adicione a miniatura à legenda
+legend.add(thumbnail);
+ 
+//criar texto no topo da legenda
+var panel = ui.Panel({
+widgets: [
+ui.Label(VisP['min'])
+],
+});
+ 
+legend.add(panel);
+ 
+Map.add(legend)
